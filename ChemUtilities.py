@@ -6,9 +6,7 @@ import Enumerate
 
 def SaltStripMolecules (molecules: pd.DataFrame, smilescol='SMILES', neutralize = True):
     tqdm.pandas ()
-    print ('salt stripping')
     molecules[smilescol] = molecules[smilescol].progress_apply(lambda smi:SaltStrip(smi, neutralize))
-    print ('completed salt stripping')
     return molecules
 
 def SaltStrip (molec, neutralize = True):
@@ -46,7 +44,6 @@ def Neutralize (smi):
         smi = Chem.MolToSmiles(m, kekuleSmiles=False)
         return smi
     except:
-        print (smi)
         return smi
 
 def Deprotect (compound, rxnscheme, deprotect_name=None, iterate = False, retsmiles = False):

@@ -7,28 +7,21 @@ import streamlit as st
 import re
 import sys
 import os
-import argparse
-import yaml
 from st_aggrid import AgGrid
 from st_aggrid.grid_options_builder import  GridOptionsBuilder
-from st_aggrid import GridUpdateMode, DataReturnMode
-import numexpr
+from st_aggrid import  DataReturnMode
 from streamlit import runtime
 import Enumerate
-import numpy as np
 
 class EnumerationUI:
-    enum = Enumerate.Enumerate()
+    enum = None
     initpath =  str(pathlib.Path (__file__).parent.parent)  + '/CIxTools.init.json'
-    smiles_colnames = ['SMILES', 'smiles']
-    bbid_colnames = ['BB_ID', 'id']
     paramslist = ['enumerate_rxnscheme', 'enumerate_remdups',  'enumerate_lastschemepath', 'enumerate_specstr', 'enumerate_schemename', 'enumerate_rndcount']
     schemelist = []
     schemename = None
     specstr = None
     lspath = None
     rxnschemefile = None
-    bbdfs = None
     rxtnts = None
     smilescol='__SMILES'
     ls = None
@@ -45,6 +38,8 @@ class EnumerationUI:
     ccontA = None
 
     def __init__ (self):
+        self.enum = Enumerate.Enumerate()
+        self.enum.LookupReactants = True
         try:
             st.set_page_config(layout="wide")
         except:
@@ -69,25 +64,25 @@ class EnumerationUI:
         """, unsafe_allow_html=True
                     )
 
-    def UpdateBBDfs(self, inpath, do_reload):
-
+    def Get_BBFiles (self, inpath):
         flist = pathlib.Path(inpath).glob('*.csv')
-
-        bbfiles =  {}
-        dfs = {}
-
+        bbfiles = {}
         for f in flist:
             c = str(f)
-            result = re.search(r'\.BB[0-9]+\.',  c)
-            if result is  not None:
-                bbfiles [result.group(0)[3:4]] = c
+            result = re.search(r'\.BB[0-9]+\.', c)
+            if result is not None:
+                bbfiles[result.group(0)[3:4]] = c
+        return bbfiles
 
+    def UpdateBBDfs(self, inpath, do_reload):
+        dfs = {}
+        bbfiles = self.Get_BBFiles (inpath)
         if not do_reload:
             for k in bbfiles.keys ():
                 if 'df' + str(k) not in st.session_state:
                     do_reload = True
         if do_reload:
-            dfs = self.enum.load_BBlists (bbfiles.values (), self.bbid_colnames, self.smiles_colnames)
+            dfs = self.enum.load_BBlists (bbfiles.values ())
             for k in dfs.keys ():
                 st.session_state['df' + str(k)] = dfs[k]
         else:
@@ -196,7 +191,7 @@ class EnumerationUI:
                     self.schemelist.append(s)
                 self.schemelist.sort()
 
-                self.bbdfs = self.UpdateBBDfs(bbpath, False)
+                self.enum.Set_BB_Info(self.UpdateBBDfs(bbpath, False))
 
                 if self.ls == '' or self.ls not in self.schemelist:
                     lsidx = 0
@@ -230,13 +225,10 @@ class EnumerationUI:
                     self.SaveScheme()
                     self.SetScheme()
                     self.schemelist.append(newname)
-                    self.bbdfs = []
-
-
+                    self.enum.Set_BB_Info([])
 
             if 'spec' not in st.session_state and self.specstr is not None and self.specstr != '':
                 st.session_state['spec'] = self.specstr
-
 
             if self.schemename != st.session_state['enumerate_schemename'] or self.specstr != st.session_state[
                 'enumerate_specstr']:
@@ -244,8 +236,8 @@ class EnumerationUI:
                 if self.specstr != '' and self.specstr is not None:
                     addspec = '/' + self.specstr
                 if self.lspath is not None and self.lspath != '':
-                    self.bbdfs = self.UpdateBBDfs(
-                        st.session_state['enumerate_lastschemepath'] + self.schemename + addspec + '/BBLists', True)
+                    self.enum.Set_BB_Info(self.UpdateBBDfs(
+                        st.session_state['enumerate_lastschemepath'] + self.schemename + addspec + '/BBLists', True))
                 st.session_state['enumerate_schemename'] = self.schemename
                 st.session_state['enumerate_specstr'] = self.specstr
                 st.session_state['aggriddata'] = None
@@ -271,9 +263,7 @@ class EnumerationUI:
                 dcol1, dcol2 = st.columns([2, 1])
                 with dcol2:
                     if st.button(label='Add Step'):
-                        print(st.session_state['enumerate_lastschemedef'])
                         defjson = json.loads(st.session_state['enumerate_lastschemedef'])
-
                         stepdict = {}
                         stepdict["Reactants"] = []
                         stepdict["Rxns"] = {'default': ''}
@@ -289,34 +279,34 @@ class EnumerationUI:
             col1, col2, col3 = st.columns(3)
             with col1:
                 if st.button('random'):
-                    for dx in range(0, len(self.bbdfs)):
-                        if self.bbdfs[dx] is not None:
-                            st.session_state['bb' + str(dx) + 'idx'] = self.bbdfs[dx].index[
-                                random.randint(0, len(self.bbdfs[dx]))]
+                    for dx in range(0, len(self.enum.bb_info_dfs)):
+                        if self.enum.bb_info_dfs[dx] is not None:
+                            st.session_state['bb' + str(dx) + 'idx'] = self.enum.bb_info_dfs[dx].index[
+                                random.randint(0, len(self.enum.bb_info_dfs[dx]))]
                     self.Enumerate = True
             with col2:
                 if st.button('enumerate'):
                     self.Enumerate = True
             with col3:
                 if st.button('clear'):
-                    for dx in range(0, len(self.bbdfs)):
+                    for dx in range(0, len(self.enum.bb_info_dfs)):
                         st.session_state['bb' + str(dx) + 'idx'] = 0
                         st.session_state['bb' + str(dx) + 'txt'] = ''
-        if self.bbdfs is not None:
-            for n in range(0, len(self.bbdfs)):
+        if self.enum.bb_info_dfs is not None:
+            for n in range(0, len(self.enum.bb_info_dfs)):
                 if 'bb' + str(n) + 'idx' not in st.session_state:
                     st.session_state['bb' + str(n) + 'idx'] = 0
                 if 'bb' + str(n) + 'txt' not in st.session_state:
                     st.session_state['bb' + str(n) + 'txt'] = ''
 
             with self.Enumeration_exp :
-                self.rxtnts = [None] * len(self.bbdfs)
-                for n in range(0, len(self.bbdfs)):
-                    df = self.bbdfs[n]
+                self.rxtnts = [None] * len(self.enum.bb_info_dfs)
+                for n in range(0, len(self.enum.bb_info_dfs)):
+                    df = self.enum.bb_info_dfs[n]
                     self.rxtnts[n] = st.text_input(key='bb' + str(n) + 'txt', label='BB' + str(n + 1) + ' (override)')
                     if df is not None:
                         if self.rxtnts[n] == '':
-                            self.rxtnts[n] = st.selectbox(label='BB' + str(n + 1), options=self.bbdfs[n][self.smilescol]
+                            self.rxtnts[n] = st.selectbox(label='BB' + str(n + 1), options=self.enum.bb_info_dfs[n][self.smilescol]
                                                      , key='bb' + str(n),
                                                      index=int(st.session_state['bb' + str(n) + 'idx']))
                 if self.rxtnts != st.session_state ['rxtnts'] :
@@ -324,16 +314,15 @@ class EnumerationUI:
                     self.Enumerate = True
     def Enumerate_Clicked (self):
         if self.Enumerate == True:
-            print ('ENUMERATING')
             with self.Enumeration_exp:
                 if self.rxtnts is None or len(self.rxtnts) == 0:
                     st.text('Reactants not correctly loaded')
                 else:
                     try:
                         self.Init_RxnSchemeFile ()
-                        res, intermeds, rxninfo= self.enum.TestReactionScheme(self.schemename, self.rxtnts, st.session_state ['enumerate_lastschemedef'], True)
+                        res, intermeds, rxninfo= self.enum.TestReactionScheme(self.schemename,
+                                    self.rxtnts, st.session_state ['enumerate_lastschemedef'], True)
                         if res is None or res == 'FAIL' or res.startswith ('FAIL') or res == 'NOSCHEMEFAIL':
-                            print ('HERE')
                             st.text ('Reaction Failure: ' + res)
                             with self.EnumSteps_cont:
                                 st.image(MolDisplay.ShowMols([''], cols=1, subImgSize=(400, 400),
@@ -380,16 +369,18 @@ class EnumerationUI:
 
     def Grid_Exp (self):
         with self.grid_exp:
-            getr100 = st.button(label='get random 100')
-            if getr100:
+            col1, col2 = st.columns (2)
+            with col1:
+                getr = st.button(label='get random ')
+            with col2:
+                rndct = int (st.text_input (label = 'random ct', value='100'))
+            if getr:
                 self.Init_RxnSchemeFile()
                 with st.spinner('Enumerating'):
                     resdf = self.enum.EnumFromBBFiles(self.schemename , self.specstr, self.specstr, self.lspath, self.specstr,
-                                                      100, self.rxnschemefile,
-                                                      SMILEScolnames=self.smiles_colnames,
-                                                      BBcolnames=self.bbid_colnames,
-                                                      rem_dups=False, returndf=True)
-                    st.write (len(resdf))
+                                                      rndct, self.rxnschemefile, returndf=True)
+                    succeeded = len(resdf[resdf['full_smiles'] != 'FAIL'])
+                    st.write ('success: ' + str (succeeded) + ' out of ' + str (len(resdf)) + ' percentage = ' + str (succeeded/len(resdf)))
                     cols =  ['full_smiles']
                     for c in resdf.columns [0:len(resdf.columns) -1]:
                         cols.append (c)
@@ -404,7 +395,7 @@ class EnumerationUI:
                 selected = AgGrid(st.session_state['aggriddata'], update_mode='SELECTION_CHANGED',
                                           gridOptions= gridOptions,  data_return_mode=DataReturnMode.AS_INPUT, reload_data=True)
                 if len(selected['selected_rows']) > 0:
-                    for n in range(0, len(self.bbdfs) ):
+                    for n in range(0, len(self.enum.bb_info_dfs) ):
                         st.session_state['bb' + str(n) + 'txt'] = selected['selected_rows'][0]['bb' + str (n+1) + '_smiles' ]
                     self.Enumerate = True
 
