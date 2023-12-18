@@ -9,19 +9,21 @@ import sys
 import os
 from st_aggrid import AgGrid
 from st_aggrid.grid_options_builder import  GridOptionsBuilder
-from st_aggrid import  DataReturnMode
+from st_aggrid import  DataReturnMode, ColumnsAutoSizeMode
 from streamlit import runtime
 import Enumerate
 
 class EnumerationUI:
     enum = None
     initpath =  str(pathlib.Path (__file__).parent.parent)  + '/CIxTools.init.json'
-    paramslist = ['enumerate_rxnscheme', 'enumerate_remdups',  'enumerate_lastschemepath', 'enumerate_specstr', 'enumerate_schemename', 'enumerate_rndcount']
+    paramslist = ['enumerate_rxnschemedir', 'enumerate_rxnscheme', 'enumerate_remdups',  'enumerate_lastschemepath', 'enumerate_specstr', 'enumerate_schemename', 'enumerate_rndcount']
     schemelist = []
     schemename = None
     specstr = None
     lspath = None
     rxnschemefile = None
+    rxnschemedir = None
+    rxnschemefullpath = None
     rxtnts = None
     smilescol='__SMILES'
     ls = None
@@ -47,14 +49,21 @@ class EnumerationUI:
         f = open(self.initpath)
         initjson = json.load(f)
         f.close()
+        if 'enumerate_rxnschemedir' not in st.session_state:
+            st.session_state['enumerate_rxnschemedir'] = ''
+        if 'enumerate_rxnscheme' not in st.session_state:
+            st.session_state['enumerate_rxnscheme'] = ''
+        self.rxnschemefullpath = st.session_state['enumerate_rxnschemedir'] + st.session_state ['enumerate_rxnscheme']
         for p in self.paramslist:
             if p not in st.session_state or st.session_state[p] == None or st.session_state [p] == '' :
                 if p in initjson:
                     st.session_state[p] = initjson [p]
                     if p == 'enumerate_rxnscheme':
+
                         self.Init_RxnSchemeFile()
                 else:
                     st.session_state[p] = ''
+
 
     def head(self):
         st.markdown("""
@@ -64,15 +73,7 @@ class EnumerationUI:
         """, unsafe_allow_html=True
                     )
 
-    def Get_BBFiles (self, inpath):
-        flist = pathlib.Path(inpath).glob('*.csv')
-        bbfiles = {}
-        for f in flist:
-            c = str(f)
-            result = re.search(r'\.BB[0-9]+\.', c)
-            if result is not None:
-                bbfiles[result.group(0)[3:4]] = c
-        return bbfiles
+
 
     def UpdateBBDfs(self, inpath, do_reload):
         dfs = {}
@@ -94,22 +95,23 @@ class EnumerationUI:
         return dflist
 
     def SaveScheme (self):
-        with open(st.session_state['enumerate_rxnscheme'], "r") as jsonFile:
+        with open(self.rxnschemefullpath, "r") as jsonFile:
             data = json.load(jsonFile)
         schemejson = json.loads (st.session_state ['enumerate_lastschemedef'])
         data[st.session_state['enumerate_schemename']] = schemejson
-        with open(st.session_state['enumerate_rxnscheme'], "w") as jsonFile:
+        with open(self.rxnschemefullpath, "w") as jsonFile:
             json.dump(data, jsonFile, indent=4)
 
     def SetScheme (self):
+        st.session_state['lastgridindex'] = None
         st.session_state['rxtnts'] = [None, None, None]
         for k in st.session_state.keys ():
             if k.startswith( 'bb') and k.endswith('idx'):
                 st.session_state[k] = 0
             if k.startswith( 'bb') and k.endswith('txt'):
                 st.session_state[k] = ''
-        if os.path.exists (st.session_state['enumerate_rxnscheme']):
-            with open(st.session_state['enumerate_rxnscheme'], "r") as jsonFile:
+        if os.path.exists (self.rxnschemefullpath):
+            with open(self.rxnschemefullpath, "r") as jsonFile:
                 data = json.load(jsonFile)
                 if st.session_state['enumerate_schemename'] in data:
                     st.session_state ['enumerate_lastschemedef'] = json.dumps (data [st.session_state['enumerate_schemename']], indent=4)
@@ -133,10 +135,10 @@ class EnumerationUI:
 
     def Init_RxnSchemeFile (self):
         self.enum.named_reactions = {}
-        if not os.path.exists (st.session_state['enumerate_rxnscheme'],):
+        if not os.path.exists (self.rxnschemefullpath):
             st.write ('Rxn Scheme Path Not Found')
             return
-        self.enum.named_reactions.update(self.enum.ReadRxnScheme(st.session_state['enumerate_rxnscheme'], 'Named_Reactions', FullInfo=True)[0])
+        self.enum.named_reactions.update(self.enum.ReadRxnScheme(self.rxnschemefullpath, 'Named_Reactions', FullInfo=True)[0])
         with open(self.initpath, "r") as jsonFile:
             data = json.load(jsonFile)
         for rxl in data ['rxnlists']:
@@ -148,20 +150,25 @@ class EnumerationUI:
         self.SaveToInit ()
 
     def Setup_Column (self):
-
         if ('schemename' in st.session_state):
             self.ls = st.session_state['schemename']
         else:
             self.ls = ''
         with self.Setup_col:
             with st.expander('Setup', expanded=True):
+                self.rxnschemedir = st.text_input(label='Rxn Scheme Directory', on_change=self.Init_RxnSchemeFile,
+                                              key='enumerate_rxnschemedir')
                 self.rxnschemefile = st.text_input(label='Rxn Scheme File', on_change=self.Init_RxnSchemeFile,
                                               key='enumerate_rxnscheme')
+                if not self.rxnschemedir.endswith ('/'):
+                    self.rxnschemedir += '/'
+
+                self.rxnschemefullpath = self.rxnschemedir + self.rxnschemefile
                 rxnschemerefresh = st.button(label='Re-initialize to Rxn Scheme File')
                 if rxnschemerefresh == True:
                     self.Init_RxnSchemeFile()
-                if os.path.exists(self.rxnschemefile) == False:
-                    st.text(self.rxnschemefile + ' does not exist. Please adjust path')
+                if os.path.exists(self.rxnschemefullpath) == False:
+                    st.text(self.rxnschemefullpath + ' does not exist. Please adjust path')
                     return
 
                 self.lspath = st.text_input(label='Scheme BB Path', on_change=self.SaveToInit, key='enumerate_lastschemepath')
@@ -171,7 +178,7 @@ class EnumerationUI:
                 else:
                     if not self.lspath.endswith ('/'):
                         self.lspath += '/'
-                f = open(self.rxnschemefile, 'r')
+                f = open(self.rxnschemefullpath, 'r')
                 schemejson = json.load(f)
 
                 if 'enumerate_schemename' not in st.session_state:
@@ -212,7 +219,6 @@ class EnumerationUI:
 
     def SchemeDef1(self):
         with self.SchemeDef_exp:
-            st.write ('Test')
             self.ccont = st.container()
             self.ccontA = st.container()
             with self.ccontA:
@@ -250,15 +256,8 @@ class EnumerationUI:
                     self.SetScheme()
     def SchemeDef2(self):
         with self.SchemeDef_exp:
-            ccol1, ccol2 = st.columns(2)
             st.text('Current Scheme: ' + str (st.session_state['enumerate_schemename']))
-            with ccol1:
-                if st.button(label='revert'):
-                    self.SetScheme()
-            with ccol2:
-                if st.button(label='save scheme'):
-                    self.SaveScheme()
-                    self.Enumerate = True
+
             with self.ccont:
                 dcol1, dcol2 = st.columns([2, 1])
                 with dcol2:
@@ -269,6 +268,11 @@ class EnumerationUI:
                         stepdict["Rxns"] = {'default': ''}
                         defjson['steps'].append(stepdict)
                         st.session_state['enumerate_lastschemedef'] = json.dumps(defjson, indent=4)
+                    if st.button(label='revert'):
+                        self.SetScheme()
+                    if st.button(label='save scheme'):
+                        self.SaveScheme()
+                        self.Enumerate = True
                 with dcol1:
                     st.text_area(height=450, label='Scheme Definition', key='enumerate_lastschemedef')
 
@@ -280,6 +284,7 @@ class EnumerationUI:
             with col1:
                 if st.button('random'):
                     for dx in range(0, len(self.enum.bb_info_dfs)):
+                        st.session_state['bb' + str(dx) + 'txt'] = ''
                         if self.enum.bb_info_dfs[dx] is not None:
                             st.session_state['bb' + str(dx) + 'idx'] = self.enum.bb_info_dfs[dx].index[
                                 random.randint(0, len(self.enum.bb_info_dfs[dx]))]
@@ -292,6 +297,9 @@ class EnumerationUI:
                     for dx in range(0, len(self.enum.bb_info_dfs)):
                         st.session_state['bb' + str(dx) + 'idx'] = 0
                         st.session_state['bb' + str(dx) + 'txt'] = ''
+
+
+
         if self.enum.bb_info_dfs is not None:
             for n in range(0, len(self.enum.bb_info_dfs)):
                 if 'bb' + str(n) + 'idx' not in st.session_state:
@@ -312,6 +320,7 @@ class EnumerationUI:
                 if self.rxtnts != st.session_state ['rxtnts'] :
                     st.session_state ['rxtnts'] = self.rxtnts
                     self.Enumerate = True
+
     def Enumerate_Clicked (self):
         if self.Enumerate == True:
             with self.Enumeration_exp:
@@ -367,18 +376,22 @@ class EnumerationUI:
                 with st.expander (label='Rxn Info Grid'):
                     MolDisplay.ShowMols_StreamLit_Grid (dispdf,['Reactant', 'Intermediate'], rowheight = 200 )
 
+
     def Grid_Exp (self):
         with self.grid_exp:
             col1, col2 = st.columns (2)
             with col1:
                 getr = st.button(label='get random ')
-            with col2:
                 rndct = int (st.text_input (label = 'random ct', value='100'))
+            with col2:
+                overrideBB = st.radio (label = 'Skip Cycle', options=['None',1,2,3])
+                if overrideBB != 'None':
+                    overrideBB = {str(overrideBB):'C'}
             if getr:
                 self.Init_RxnSchemeFile()
                 with st.spinner('Enumerating'):
                     resdf = self.enum.EnumFromBBFiles(self.schemename , self.specstr, self.specstr, self.lspath, self.specstr,
-                                                      rndct, self.rxnschemefile, returndf=True)
+                                                      rndct, self.rxnschemefullpath, returndf=True, overrideBB = overrideBB)
                     succeeded = len(resdf[resdf['full_smiles'] != 'FAIL'])
                     st.write ('success: ' + str (succeeded) + ' out of ' + str (len(resdf)) + ' percentage = ' + str (succeeded/len(resdf)))
                     cols =  ['full_smiles']
@@ -389,15 +402,22 @@ class EnumerationUI:
 
             if 'aggriddata' in  st.session_state and st.session_state ['aggriddata'] is not None:
                 gb = GridOptionsBuilder.from_dataframe(st.session_state['aggriddata'])
-
                 gb.configure_selection('single')
+                gb.configure_default_column(width=50)
+                gb.configure_column("full_smiles", headerName="SMILES", width=200)
                 gridOptions = gb.build()
                 selected = AgGrid(st.session_state['aggriddata'], update_mode='SELECTION_CHANGED',
-                                          gridOptions= gridOptions,  data_return_mode=DataReturnMode.AS_INPUT, reload_data=True)
+                                          gridOptions= gridOptions,  data_return_mode=DataReturnMode.AS_INPUT,
+                                  reload_data=True, key = 'gridagg', height=600, custom_css={ "#gridToolBar": { "padding-bottom": "0px !important", } }
+                                 )
                 if len(selected['selected_rows']) > 0:
+                    selid = selected['selected_rows'][0]['_selectedRowNodeInfo']['nodeId']
+                if len(selected['selected_rows']) > 0 and (selid != st.session_state['lastgridindex']):
+                    st.session_state['lastgridindex'] = selected['selected_rows'][0]['_selectedRowNodeInfo']['nodeId']
                     for n in range(0, len(self.enum.bb_info_dfs) ):
                         st.session_state['bb' + str(n) + 'txt'] = selected['selected_rows'][0]['bb' + str (n+1) + '_smiles' ]
                     self.Enumerate = True
+
 
     def Export_Expander (self):
         with self.Export_exp:
@@ -415,7 +435,7 @@ class EnumerationUI:
                         ct = int (countval)
                     except:
                         ct = 5000
-                    self.enum.EnumFromBBFiles(self.schemename, self.specstr, self.specstr, self.lspath,  self.specstr, ct, self.rxnschemefile, SMILEScolnames=self.smiles_colnames, BBcolnames=self.bbid_colnames, rem_dups=remdups, retIntermeds=addintermeds)
+                    self.enum.EnumFromBBFiles(self.schemename, self.specstr, self.specstr, self.lspath,  self.specstr, ct, self.rxnschemefullpath, SMILEScolnames=self.smiles_colnames, BBcolnames=self.bbid_colnames, rem_dups=remdups, retIntermeds=addintermeds)
 
     def Layout (self):
         self.Setup_col, self.Activity_col, Output_col = st.columns([2, 2,2])

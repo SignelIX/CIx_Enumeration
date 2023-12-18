@@ -47,6 +47,10 @@ class Enumerate:
     bbid_colnames = ['BB_ID', 'id']
     rxn_colnames = ['reaction_name', 'reaction']
     reagent_prefix = 'r'
+    rxnscheme = None
+    scheme_reactants = None
+    scheme_name = None
+    scheme_source = None
 
     #region Helpers
     @staticmethod
@@ -124,8 +128,8 @@ class Enumerate:
                 MolDisplay.ShowMols([ r1, r2])
         return smi, prod_ct, products
 
-    @staticmethod
-    def ReadRxnScheme (fname_json, schemename, verbose = True, FullInfo = False):
+    def ReadRxnScheme (self, fname_json, schemename, verbose = True, FullInfo = False, Store = False):
+
         try:
             data = {}
             data[schemename] = json.loads(fname_json)
@@ -137,20 +141,48 @@ class Enumerate:
             except Exception as E:
                 if verbose:
                     print ('json read error:', str(E))
+                if Store:
+                    self.scheme_reactants = None
+                    self.rxnscheme = None
                 return None, None
         if schemename not in data:
             if verbose:
                 print('schemename error:', schemename)
+            if Store:
+                self.scheme_reactants = None
+                self.rxnscheme = None
             return None, None
         if 'reactants' not in data[schemename]:
             reactants = None
         else:
             reactants = data[schemename]["reactants"]
+
+        if Store:
+            self.scheme_reactants = reactants
+            self.rxnscheme = data[schemename]
+            self.schemename = schemename
+            self.scheme_source = fname_json
         if FullInfo:
             return data[schemename], reactants
         else:
             return data[schemename]["steps"], reactants
-
+    def Load_NamedReactions (self, rxnfiles):
+        self.named_reactions = {}
+        namedrxnsjson, etc = self.ReadRxnScheme(self.scheme_source, 'Named_Reactions', FullInfo=True, Store=False)
+        self.named_reactions.update(namedrxnsjson)
+        if rxnfiles is not None:
+            for rxl in rxnfiles:
+                if '/' not in rxl:
+                    rxl = str(pathlib.Path(__file__).parent.parent) + '/' + rxl
+                with open(rxl, "r") as jsonFile:
+                    data = json.load(jsonFile)
+                self.named_reactions.update(data)
+    def Add_Library_BBLists (self, librarypath, library ):
+        bbfiles = self.Get_BBFiles(librarypath + '/' + library)
+        dfs = self.load_BBlists(bbfiles.values())
+        dflist = sorted(dfs.items())
+        dflist = [x[1] for x in dflist]
+        self.Set_BB_Info(dflist)
     def getReactants (self, rx, reactants, prior_product, in_reactants, step, rxtants):
         if step["Reactants"][rx] == 'None':
             reactants.append ('None')
@@ -167,6 +199,19 @@ class Enumerate:
             idx = int(step["Reactants"][rx][len (self.reagent_prefix):])
             reactants.append(in_reactants[idx])
         else:
+            otherrxtidx = abs(rx - 1)
+            if step['Reactants'][otherrxtidx].startswith (self.reagent_prefix):
+                ridx = int(step['Reactants'][otherrxtidx][len(self.reagent_prefix):])
+                mappedcol =step["Reactants"][rx]
+                if mappedcol in self.bb_info_dfs[ridx].columns:
+                    bbdf = self.bb_info_dfs[ridx]
+                    otherrxtntsmiles = in_reactants[ridx]
+                    if otherrxtntsmiles != 'C':
+                        colvalsmiles = bbdf[bbdf[self.smilescol] == otherrxtntsmiles ].iloc [0][ mappedcol]
+                    else:
+                        colvalsmiles = bbdf.iloc[0][mappedcol]
+                    reactants.append(colvalsmiles)
+                    return reactants
             reactants.append(step["Reactants"][rx])
         return reactants
 
@@ -204,6 +249,7 @@ class Enumerate:
         reactants = self.getReactants(0, reactants, prior_product, in_reactants, step, rxtants)
         reactants = self.getReactants(1, reactants, prior_product, in_reactants, step, rxtants)
         reactions_dict = self.Lookup_Rxns_From_Reactants (step ['Reactants'], reactants)
+
 
         if reactions_dict != {} :
             reaction = reactions_dict [list(reactions_dict.keys ())[0]]
@@ -260,6 +306,8 @@ class Enumerate:
     def RunRxnScheme (self, in_reactants, schemefile_jsontext, schemename, showmols, schemeinfo = None):
         if schemeinfo is not None:
             scheme, rxtants = [schemeinfo[0], schemeinfo [1]]
+            if 'steps' in  scheme:
+                scheme = scheme ['steps']
         else:
             scheme, rxtants = self.ReadRxnScheme(schemefile_jsontext, schemename)
         if scheme is None:
@@ -267,6 +315,7 @@ class Enumerate:
         p=in_reactants [0]
         prod_ct = 1
         intermeds = []
+
         for step in scheme:
             stepname = step
             if type (scheme) == dict:
@@ -280,6 +329,7 @@ class Enumerate:
             if reaction == 'product':
                 continue
             else:
+
                 if self.named_reactions is not None:
                     rlist = []
                     if type (reaction) == str:
@@ -296,7 +346,7 @@ class Enumerate:
 
                 try:
                     p, outct, products = self.React_Molecules(reactants [0], reactants [1],  reaction,  showmols)
-                except:
+                except Exception as e:
                     p = None
                     outct = 0
                 if outct > 0:
@@ -332,7 +382,6 @@ class Enumerate:
             bbdf = bbdf.rename(columns=changecoldict)
         return bbdf
 
-
     #region BBs
     def load_BBlists(self, bblists):
         cycs = []
@@ -350,7 +399,6 @@ class Enumerate:
                         bbdict [cyc] = None
                     else:
                         bbdict[cyc] = pd.read_csv(l)
-
         for cyc in bbdict.keys():
             if bbdict [cyc] is not None:
                 bbdict[cyc] = self.Reset_BBDF_ColNames (bbdict [cyc])
@@ -402,12 +450,22 @@ class Enumerate:
 
         return infilelist
 
+    @staticmethod
+    def Get_BBFiles( inpath):
+        flist = pathlib.Path(inpath).glob('*.csv')
+        bbfiles = {}
+        for f in flist:
+            c = str(f)
+            result = re.search(r'\.BB[0-9]+\.', c)
+            if result is not None:
+                bbfiles[result.group(0)[3:4]] = c
+        return bbfiles
     # endregion BBs
 
     #region Enumerations
     def EnumFromBBFiles(self, libname, bb_specialcode, out_specialcode, enumsfolder, lib_subfolder,
                         num_strux, rxschemefile, picklistfile=None, SMILEScolnames = [], BBcolnames = [],
-                        rem_dups = False, returndf = False, write_fails_enums = True, retIntermeds = False):
+                        rem_dups = False, returndf = False, write_fails_enums = True, retIntermeds = False, overrideBB ={}):
 
         #find and load BB inputs
         infilelist = self.Get_BBFiles (bb_specialcode, lib_subfolder, enumsfolder, libname)
@@ -433,14 +491,13 @@ class Enumerate:
         outfile = self.enumerate_library_strux(libname, rxschemefile, infilelist, outpath, num_strux, picklistfile,
                                                SMILEScolnames=SMILEScolnames, BBIDcolnames=BBcolnames,
                                                removeduplicateproducts=rem_dups, write_fails_enums=write_fails_enums,
-                                               retIntermeds = retIntermeds)
+                                               retIntermeds = retIntermeds, overrideBB = overrideBB)
         return outfile
 
     def TestReactionScheme(self,schemename, rxtnts, rxnschemefile, retIntermeds = False):
         for r in range (len(rxtnts)):
             if  (type (rxtnts[r]) is not str) :
                 rxtnts [r] = 'None'
-
         res = self.RunRxnScheme(rxtnts, rxnschemefile, schemename, False)
         rxnslist = []
         for k in res [2][0]:
@@ -458,45 +515,53 @@ class Enumerate:
             else:
                 return res[0], None, None
 
+    def rec_bbpull(self, bdfs, level, cycct, bbslist, ct, reslist, fullct, hdrs,
+                   libname, rxschemefile, outpath, rndct, removeduplicateproducts,
+                   currct=0, appendmode=False, retIntermeds=False):
+        if reslist is None:
+            reslist = [[]] * min(chksz, fullct)
+
+        for i, b in bdfs[level].iterrows():
+            bb = b[self.idcol]
+            bbs = b[self.smilescol]
+            rxn = b[self.rxncol]
+            if level == 0:
+                bbslist = []
+
+            bblevellist = copy.deepcopy(bbslist)
+            bblevellist.append(bb)
+            bblevellist.append(bbs)
+            bblevellist.append(rxn)
+
+            if level < cycct - 1:
+                ct, reslist, currct, appendmode = self.rec_bbpull(bdfs, level + 1, cycct, bblevellist, ct, reslist,
+                                                            fullct, hdrs,
+                                                            libname, rxschemefile, outpath, rndct,
+                                                            removeduplicateproducts,
+                                                            currct=currct, appendmode=appendmode,
+                                                            retIntermeds=retIntermeds)
+            else:
+                reslist[currct] = bblevellist
+
+                ct += 1
+                currct += 1
+
+                if currct == chksz or ct == fullct:
+                    enum_in = pd.DataFrame(reslist, columns=hdrs)
+                    # Enumerate
+                    self.DoParallel_Enumeration(enum_in, hdrs, libname, rxschemefile, outpath, cycct, rndct,
+                                                removeduplicateproducts, appendmode=appendmode,
+                                                retIntermeds=retIntermeds)
+                    reslist = [[]] * min(chksz, fullct - ct)
+                    currct = 0
+                    appendmode = True
+                    gc.collect()
+
+        return ct, reslist, currct, appendmode
     def enumerate_library_strux(self, libname, rxschemefile, infilelist, outpath, rndct=-1, bblistfile=None,
                                 SMILEScolnames = [], BBIDcolnames = [], removeduplicateproducts = False,
-                                outtype = 'filepath', write_fails_enums = True, retIntermeds=False):
-        def rec_bbpull( bdfs, level, cycct, bbslist, ct, reslist, fullct, hdrs, currct = 0, appendmode = False,
-                        retIntermeds = False):
-            if reslist is None:
-                reslist = [[]] * min(chksz, fullct)
-            for i, b in bdfs[level].iterrows():
+                                outtype = 'filepath', write_fails_enums = True, retIntermeds=False, overrideBB = {}):
 
-                bb = b[self.idcol]
-                bbs = b[self.smilescol]
-                rxn = b[self.rxncol]
-                if level == 0:
-                    bbslist = []
-
-                bblevellist = copy.deepcopy (bbslist)
-                bblevellist.append(bb)
-                bblevellist.append(bbs)
-                bblevellist.append(rxn)
-
-                if level < cycct - 1:
-                    ct, reslist, currct, appendmode = rec_bbpull(bdfs, level + 1, cycct, bblevellist, ct, reslist, fullct, hdrs, currct = currct, appendmode=appendmode, retIntermeds=retIntermeds)
-                else:
-                    reslist[currct] = bblevellist
-
-                    ct += 1
-                    currct += 1
-
-                    if currct == chksz or ct == fullct:
-                        enum_in = pd.DataFrame (reslist, columns=hdrs)
-                        #Enumerate
-                        self.DoParallel_Enumeration(enum_in, hdrs, libname, rxschemefile, outpath, cycct, rndct,
-                                                    removeduplicateproducts, appendmode=appendmode, retIntermeds=retIntermeds)
-                        reslist = [[]] * min(chksz, fullct - ct)
-                        currct = 0
-                        appendmode = True
-                        gc.collect ()
-
-            return ct, reslist,  currct, appendmode
 
         #set up default values
         if SMILEScolnames is None:
@@ -542,7 +607,9 @@ class Enumerate:
                 with open(outpath + ".EnumList.csv", "w") as f:
                     writer = csv.writer(f)
                     writer.writerow(hdrs)
-                rec_bbpull (bdfs, 0, cycct, [], 0, None, fullct, hdrs, appendmode = appendmode,
+                self.rec_bbpull (bdfs, 0, cycct, [], 0, None, fullct, hdrs,
+                            libname, rxschemefile, outpath, rndct, removeduplicateproducts,
+                            appendmode = appendmode,
                             retIntermeds=retIntermeds)
             else:
                 reslist = [[]] * min(rndct, chksz)
@@ -553,12 +620,18 @@ class Enumerate:
                 while ct < rndct:
                     bblist = []
                     for ix in range (0, cycct):
-                        ri = random.randint (0, len (cycdict['BB' + str (ix + 1)]))
-                        b = cycdict['BB' + str (ix + 1)].iloc[ri]
-                        bb = b[self.idcol]
-                        bbs = b[self.smilescol]
-                        bblist.append (bb)
-                        bblist.append (bbs)
+                        if str (ix+1) in overrideBB :
+                            bb = overrideBB [str(ix+1)]
+                            bbs = overrideBB [str(ix+1)]
+                            bblist.append(bb)
+                            bblist.append(bbs)
+                        else:
+                            ri = random.randint (0, len (cycdict['BB' + str (ix + 1)]))
+                            b = cycdict['BB' + str (ix + 1)].iloc[ri]
+                            bb = b[self.idcol]
+                            bbs = b[self.smilescol]
+                            bblist.append (bb)
+                            bblist.append (bbs)
 
                     #Enumerate if not already found
                     if bblist not in reslist:
