@@ -9,7 +9,7 @@ import sys
 import os
 from st_aggrid import AgGrid
 from st_aggrid.grid_options_builder import  GridOptionsBuilder
-from st_aggrid import  DataReturnMode, ColumnsAutoSizeMode
+from st_aggrid import  DataReturnMode
 from streamlit import runtime
 import Enumerate
 
