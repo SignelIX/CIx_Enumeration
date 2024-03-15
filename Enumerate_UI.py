@@ -13,6 +13,7 @@ from st_aggrid import  DataReturnMode
 from streamlit import runtime
 import Enumerate
 
+
 class EnumerationUI:
     enum = None
     initpath =  str(pathlib.Path (__file__).parent.parent)  + '/CIxTools.init.json'
