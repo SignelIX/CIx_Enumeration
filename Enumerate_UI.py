@@ -136,7 +136,7 @@ class EnumerationUI:
     def Init_RxnSchemeFile (self):
         self.enum.named_reactions = {}
         if not os.path.exists (self.rxnschemefullpath):
-            st.write ('Rxn Scheme Path Not Found')
+            st.write ('Rxn Scheme Path Not Found', self.rxnschemefullpath)
             return
         self.enum.named_reactions.update(self.enum.ReadRxnScheme(self.rxnschemefullpath, 'Named_Reactions', FullInfo=True)[0])
         with open(self.initpath, "r") as jsonFile:
