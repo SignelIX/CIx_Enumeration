@@ -435,32 +435,32 @@ class Enumerate:
         else:
             srchstr = libname + '.BB?.csv'
             flist = pathlib.Path(bbpath).glob(srchstr)
-        infilelist = []
+        infilelist = {}
 
         for f in flist:
             c = str(f)
             result = re.search(r'\.BB[0-9]+\.', c)
             if result is not None:
-                infilelist.append(c)
-        infilelist.sort()
-        if len(infilelist) == 0:
+                infilelist[result.group(0)[3:4]] = c
+
+        if len(infilelist.keys ()) == 0:
             print('FAIL: No BB files found with format ' + srchstr + ' found in ' + bbpath, infilelist)
             print ('Inputs:BBcode:' , bb_specialcode, ' lib_subfldr:', lib_subfolder, ' enum folder:', enumsfolder, ' lib:', libname)
-            return ''
+            return {}
 
         return infilelist
 
-    @staticmethod
-    def Get_BBFiles( inpath):
-        flist = pathlib.Path(inpath).glob('*.csv')
-        bbfiles = {}
-        for f in flist:
-            c = str(f)
-            result = re.search(r'\.BB[0-9]+\.', c)
-            if result is not None:
-                bbfiles[result.group(0)[3:4]] = c
-        return bbfiles
-    # endregion BBs
+    # @staticmethod
+    # def Get_BBFiles( inpath):
+    #     flist = pathlib.Path(inpath).glob('*.csv')
+    #     bbfiles = {}
+    #     for f in flist:
+    #         c = str(f)
+    #         result = re.search(r'\.BB[0-9]+\.', c)
+    #         if result is not None:
+    #             bbfiles[result.group(0)[3:4]] = c
+    #     return bbfiles
+    # # endregion BBs
 
     #region Enumerations
     def EnumFromBBFiles(self, libname, bb_specialcode, out_specialcode, enumsfolder, lib_subfolder,
@@ -468,7 +468,7 @@ class Enumerate:
                         rem_dups = False, returndf = False, write_fails_enums = True, retIntermeds = False, overrideBB ={}):
 
         #find and load BB inputs
-        infilelist = self.Get_BBFiles (bb_specialcode, lib_subfolder, enumsfolder, libname)
+        infilelist = self.Get_BBFiles (bb_specialcode, lib_subfolder, enumsfolder, libname).values ()
         if type (infilelist) == str:
             return
 

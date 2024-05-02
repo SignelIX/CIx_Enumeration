@@ -436,7 +436,7 @@ class EnumerationUI:
                         ct = int (countval)
                     except:
                         ct = 5000
-                    self.enum.EnumFromBBFiles(self.schemename, self.specstr, self.specstr, self.lspath,  self.specstr, ct, self.rxnschemefullpath, SMILEScolnames=self.smiles_colnames, BBcolnames=self.bbid_colnames, rem_dups=remdups, retIntermeds=addintermeds)
+                    self.enum.EnumFromBBFiles(self.schemename, self.specstr, self.specstr, self.lspath,  self.specstr, ct, self.rxnschemefullpath, rem_dups=remdups, retIntermeds=addintermeds)
 
     def Layout (self):
         self.Setup_col, self.Activity_col, Output_col = st.columns([2, 2,2])
